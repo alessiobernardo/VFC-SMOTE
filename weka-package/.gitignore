@@ -1,0 +1,8 @@
+/target/
+.idea
+*.iml
+*~
+*.bak
+src/
+doc/
+dist/
