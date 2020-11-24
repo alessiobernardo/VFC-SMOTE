@@ -1,10 +1,8 @@
 /*
- *    RebalanceStream.java
+ *    VFBCSMOTE.java
  * 
  *    @author Alessio Bernardo (alessio dot bernardo at polimi dot com)
- *    @author Emanuele Della Valle (emanuele dot dellavalle at polimi dot com)
- *    @author Albert Bifet (abifet at cs dot waikato dot ac dot nz)
- *
+
  *    Licensed under the Apache License, Version 2.0 (the "License");
  *    you may not use this file except in compliance with the License.
  *    You may obtain a copy of the License at
@@ -77,7 +75,7 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
 
     @Override
     public String getPurposeString() {
-        return "OnlineSMOTE strategy that saves the data in a sliding window and when the minority class ratio is less than a threshold it generates some synthetic new samples using SMOTE";
+    	return "VFBCSMOTE strategy that saves all the mis-classified samples in a histogram managed by ADWIN. When the minority class ratio is less than a threshold it generates some synthetic new samples using an ONLINE BORDERLINE SMOTE version";
     }
     
     private static final long serialVersionUID = 1L;
@@ -87,21 +85,14 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     
     public ClassOption baseHistogramOption = new ClassOption("baseHistogram", 'h',
             "Histrogram to use.", Classifier.class, "trees.HoeffdingAdaptiveTreeHistogram");        
-    
-    /*
-    public IntOption neighborsOption = new IntOption("neighbors", 'k',
-            "Number of neighbors for SMOTE.",
-            5, 1, Integer.MAX_VALUE); 
-    */
-    
+       
     public FloatOption thresholdOption = new FloatOption("threshold", 't',
             "Minority class samples threshold.",
-            0.0, 0.0, 1.0); 
-    
+            0.5, 0.0, 1.0); 
     
     public FloatOption percentageCorrectlyClassifiedOption = new FloatOption("percentageCorrectlyClassified", 'z',
             "Percentage of instances correctly classied to save.",
-            0.5, 0.0, 1.0);     
+            0.0, 0.0, 1.0);     
     
     public IntOption minSizeAllowedOption = new IntOption("minSizeAllowed", 'm',
             "Minimum number of samples in the minority class for appling SMOTE.",
