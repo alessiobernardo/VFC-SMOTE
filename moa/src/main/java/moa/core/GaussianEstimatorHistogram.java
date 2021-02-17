@@ -19,6 +19,10 @@
  */
 package moa.core;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import org.apache.commons.math3.stat.descriptive.rank.Percentile;
+
 import moa.AbstractMOAObject;
 
 /**
@@ -42,7 +46,9 @@ public class GaussianEstimatorHistogram extends AbstractMOAObject {
     
     protected double simpleMean;
     
-    protected double simpleVarianceSum;
+    protected double simpleVarianceSum;       
+    
+    //protected ArrayList<Double> attValDist = new ArrayList<Double>();
 
     public static final double NORMAL_CONSTANT = Math.sqrt(2 * Math.PI);
 
@@ -67,7 +73,16 @@ public class GaussianEstimatorHistogram extends AbstractMOAObject {
             
             this.simpleMean = value;
             this.simpleSum = 1;
-        }
+        }                
+        //qui
+        //attValDist.add(value);
+        /*
+        for (int i = 0; i < weight; i++) {
+        	attValDist.add(value);
+			
+		}
+		*/
+        
     }
 
     public void addObservations(GaussianEstimatorHistogram obs) {
@@ -115,9 +130,23 @@ public class GaussianEstimatorHistogram extends AbstractMOAObject {
     }
 
     public double getSimpleVariance() {
-        return this.simpleSum > 1.0 ? this.simpleVarianceSum / (this.simpleSum - 1.0)
-                : 0.0;
+        return this.simpleSum > 1.0 ? this.simpleVarianceSum / (this.simpleSum - 1.0) : 0.0;
     }
+    
+    /*
+    public double getQuantileDist(double q) {
+    	Collections.sort(this.attValDist);
+    	double[] array = this.attValDist.stream().mapToDouble(d -> d).toArray();
+    	Percentile p = new Percentile();    	
+    	return p.evaluate(array, q);
+    }
+    
+    
+    public double[] getAttValDist() {
+    	Collections.sort(this.attValDist);
+    	return this.attValDist.stream().mapToDouble(d -> d).toArray();
+    }
+	*/
 
     public double probabilityDensity(double value) {
         if (this.weightSum > 0.0) {

@@ -25,6 +25,10 @@ import moa.core.Utils;
 
 import java.util.Set;
 import java.util.TreeSet;
+
+import org.apache.commons.math3.distribution.BetaDistribution;
+import org.apache.commons.math3.distribution.GammaDistribution;
+
 import moa.classifiers.core.AttributeSplitSuggestion;
 import moa.classifiers.core.AttributeSplitSuggestionHistrogram;
 import moa.classifiers.core.conditionaltests.NumericAttributeBinaryTest;
@@ -53,13 +57,41 @@ public class GaussianNumericAttributeClassObserverHistogram extends AbstractOpti
 
     protected DoubleVector maxValueObservedPerClass = new DoubleVector();
 
-    protected AutoExpandVector<GaussianEstimatorHistogram> attValDistPerClass = new AutoExpandVector<GaussianEstimatorHistogram>();
+    protected AutoExpandVector<GaussianEstimatorHistogram> attValDistPerClass = new AutoExpandVector<GaussianEstimatorHistogram>();        
 
     public IntOption numBinsOption = new IntOption("numBins", 'n',
             "The number of bins.", 10, 1, Integer.MAX_VALUE);
     
     public AutoExpandVector<GaussianEstimatorHistogram> getAttValDistPerClass() {
     	return this.attValDistPerClass;
+    }
+    
+    public DoubleVector getMinValueObservedPerClass() {
+    	return this.minValueObservedPerClass;
+    }
+    
+    public DoubleVector getMaxValueObservedPerClass() {
+    	return this.maxValueObservedPerClass;
+    }
+    
+    public double getSampleFromBeta(int minClass) { //qui
+    	//double meanScaled = (this.attValDistPerClass.get(minClass).getSimpleMean() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass));
+		//double varianceScaled = Math.pow(((this.attValDistPerClass.get(minClass).getSimpleStdDev() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass))),2);
+    	double meanScaled = (this.attValDistPerClass.get(minClass).getMean() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass));
+		double varianceScaled = Math.pow(((this.attValDistPerClass.get(minClass).getStdDev() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass))),2);
+		double alpha = Math.pow(meanScaled, 2) * (((1-meanScaled) / varianceScaled) - (1 / meanScaled));
+		double beta = alpha * ((1 / meanScaled) - 1);						
+		return (this.minValueObservedPerClass.getValue(minClass) + ((this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass)) * new BetaDistribution(alpha,beta).sample()));
+    }
+    
+    public double getSampleFromGamma(int minClass) { //qui
+    	double meanScaled = (this.attValDistPerClass.get(minClass).getSimpleMean() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass));
+		double varianceScaled = Math.pow(((this.attValDistPerClass.get(minClass).getSimpleStdDev() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass))),2);
+    	//double meanScaled = (this.attValDistPerClass.get(minClass).getMean() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass));
+		//double varianceScaled = Math.pow(((this.attValDistPerClass.get(minClass).getStdDev() - this.minValueObservedPerClass.getValue(minClass)) / (this.maxValueObservedPerClass.getValue(minClass) - this.minValueObservedPerClass.getValue(minClass))),2);
+		double alpha = Math.pow(meanScaled, 2) / varianceScaled;
+		double beta = 1;						
+		return new GammaDistribution(alpha,beta).sample();
     }
 
     @Override

@@ -19,10 +19,10 @@
  */
 package moa.classifiers.trees;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
-
 import moa.capabilities.Capability;
 import moa.capabilities.ImmutableCapabilities;
 import moa.classifiers.bayes.NaiveBayes;
@@ -32,6 +32,7 @@ import moa.core.DoubleVector;
 import moa.core.MiscUtils;
 import moa.core.Utils;
 import com.yahoo.labs.samoa.instances.Instance;
+import org.apache.commons.math3.util.Pair;
 
 /**
  * Hoeffding Adaptive Tree Histogram for evolving data streams.
@@ -86,7 +87,9 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
         public void filterInstanceToLeaves(Instance inst, SplitNode myparent, int parentBranch, List<FoundNode> foundNodes,
                 boolean updateSplitterCounts);
         
-        public void getLeaves(SplitNode myparent, int parentBranch, List<FoundNode> foundNodes, int minSizeAllowed);
+        public void getLeaves(SplitNode myparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed, int minClass);
+        
+        public void getMisclassifiedLeaves(SplitNode myparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed);
         
         public void getNumberInstancesInChildren(SplitNode myparent, int parentBranch, DoubleVector classesDistribution);
                 
@@ -176,7 +179,8 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
         public void learnFromInstance(Instance inst, HoeffdingAdaptiveTreeHistogram ht, SplitNode parent, int parentBranch, boolean isAlternateTree) {
             int trueClass = (int) inst.classValue();
             this.observedClassDistributionNode.addToValue(trueClass,1); 
-            this.observedSinceCreation.addToValue(trueClass, 1);
+            //this.observedSinceCreation.addToValue(trueClass, 1); //qui
+            this.observedSinceCreation.addToValue(trueClass, inst.weight());
             //New option vore
             int k = MiscUtils.poisson(1.0, this.classifierRandom);
             Instance weightedInst = (Instance) inst.copy();
@@ -311,14 +315,19 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
             }
         }
         
-        public void getLeaves(SplitNode myparent, int parentBranch, List<FoundNode> foundNodes,int minSizeAllowed) {        	
+        public void getLeaves(SplitNode myparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed, int minClass) {          	
             for (Node child : this.children) {            
-                if (child != null) {
-                	((NewNode) child).getLeaves(this, this.children.indexOf(child), foundNodes,minSizeAllowed);                	
-                } else {
-                	if (this.observedClassDistributionNode.minWeight() >= minSizeAllowed) {
-                		foundNodes.add(new FoundNode(null, this, this.children.indexOf(child)));
+                if (child != null) {                	
+                	((NewNode) child).getLeaves(this, this.children.indexOf(child), nodeWeights, minSizeAllowed, minClass);                	
+                } else { 
+                	/*
+                	if (this.observedClassDistributionNode.getValue(minClass) >= minSizeAllowed) { //qui          	
+                		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(null, this, this.children.indexOf(child)),this.observedClassDistributionNode.getValue(minClass)));                		
                 	}                    
+                	*/
+                	if (this.observedClassDistribution.getValue(minClass) >= minSizeAllowed) {     	
+                		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(null, this, this.children.indexOf(child)),this.observedClassDistribution.getValue(minClass)));                		
+                	}                   	                 
                 }
             }
             
@@ -329,6 +338,23 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
             }
             */
         }
+        
+        public void getMisclassifiedLeaves(SplitNode myparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed) {          	
+            for (Node child : this.children) {            
+                if (child != null) {                	
+                	((NewNode) child).getMisclassifiedLeaves(this, this.children.indexOf(child), nodeWeights, minSizeAllowed);                	
+                } else { 
+                	/*
+                	if (this.observedClassDistributionNode.sumOfValues() >= minSizeAllowed) { //qui          	
+                		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(null, this, this.children.indexOf(child)),this.observedClassDistributionNode.sumOfValues()));                		
+                	}                    
+                	*/
+                	if (this.observedClassDistribution.sumOfValues() >= minSizeAllowed) {     	
+                		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(null, this, this.children.indexOf(child)),this.observedClassDistribution.sumOfValues()));                		
+                	}                   	                 
+                }
+            }                       
+        }        
         
         public void getNumberInstancesInChildren(SplitNode myparent, int parentBranch, DoubleVector classesDistribution) {
         	classesDistribution.addValues(this.observedClassDistributionNode);
@@ -404,13 +430,14 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
             	ht.observedClassDistribution.addToValue(trueClass,1);
             }             
             this.observedClassDistributionNode.addToValue(trueClass, 1);
-            this.observedSinceCreation.addToValue(trueClass, 1);
+            //this.observedSinceCreation.addToValue(trueClass, 1); //qui
             //New option vore
             int k = MiscUtils.poisson(1.0, this.classifierRandom);
             Instance weightedInst = (Instance) inst.copy();
             if (k > 0) {
                 weightedInst.setWeight(inst.weight() * k);
             }
+            this.observedSinceCreation.addToValue(trueClass, weightedInst.weight()); //qui
             //Compute ClassPrediction using filterInstanceToLeaf
             int ClassPrediction = Utils.maxIndex(this.getClassVotes(inst, ht));
 
@@ -480,11 +507,17 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
                 SplitNode splitparent, int parentBranch,
                 List<FoundNode> foundNodes, boolean updateSplitterCounts) {
             foundNodes.add(new FoundNode(this, splitparent, parentBranch));
+        }              
+        
+        public void getLeaves(SplitNode splitparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed, int minClass) {
+        	if ((int) this.observedSinceCreation.getValue(minClass) >= minSizeAllowed) { 
+        		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(this, splitparent, parentBranch),this.observedSinceCreation.getValue(minClass)));
+        	}        	
         }
         
-        public void getLeaves(SplitNode splitparent, int parentBranch, List<FoundNode> foundNodes, int minSizeAllowed) {
-        	if ((int) this.observedSinceCreation.minWeight() >= minSizeAllowed) {
-        		foundNodes.add(new FoundNode(this, splitparent, parentBranch));
+        public void getMisclassifiedLeaves(SplitNode splitparent, int parentBranch, List<Pair<FoundNode, Double>> nodeWeights, int minSizeAllowed) {
+        	if ((int) this.observedSinceCreation.sumOfValues() >= minSizeAllowed) { 
+        		nodeWeights.add(new Pair<FoundNode, Double>(new FoundNode(this, splitparent, parentBranch),this.observedSinceCreation.sumOfValues()));
         	}        	
         }
         
@@ -537,12 +570,20 @@ public class HoeffdingAdaptiveTreeHistogram extends HoeffdingTreeHistogram {
         return nodes.toArray(new FoundNode[nodes.size()]);
     }
     
-    public FoundNode[] getLeaves(SplitNode parent, int parentBranch, int minSizeAllowed) {
-    	List<FoundNode> nodes = new LinkedList<FoundNode>();
+    public List<Pair<FoundNode, Double>> getLeaves(SplitNode parent, int parentBranch, int minSizeAllowed, int minClass) {
+    	List<Pair<FoundNode, Double>> nodeWeights = new ArrayList<Pair<FoundNode, Double>>();        
     	if (this.treeRoot != null) {
-    		((NewNode) this.treeRoot).getLeaves(parent,parentBranch,nodes,minSizeAllowed);
-    	}
-        return nodes.toArray(new FoundNode[nodes.size()]);
+    		((NewNode) this.treeRoot).getLeaves(parent,parentBranch,nodeWeights,minSizeAllowed,minClass);
+    	}    	
+        return nodeWeights;               
+    }
+    
+    public List<Pair<FoundNode, Double>> getMisclassifiedLeaves(SplitNode parent, int parentBranch, int minSizeAllowed) {
+    	List<Pair<FoundNode, Double>> nodeWeights = new ArrayList<Pair<FoundNode, Double>>();        
+    	if (this.treeRoot != null) {
+    		((NewNode) this.treeRoot).getMisclassifiedLeaves(parent,parentBranch,nodeWeights,minSizeAllowed);
+    	}    	
+        return nodeWeights;               
     }
     
     public DoubleVector getNumberInstancesInChildren(SplitNode parent, int parentBranch) {

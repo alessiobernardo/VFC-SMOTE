@@ -1,8 +1,8 @@
 /*
- *    VFBCSMOTE.java
+ *    VFCSMOTE.java
  * 
  *    @author Alessio Bernardo (alessio dot bernardo at polimi dot com)
-
+ *
  *    Licensed under the Apache License, Version 2.0 (the "License");
  *    you may not use this file except in compliance with the License.
  *    You may obtain a copy of the License at
@@ -22,10 +22,11 @@ package moa.classifiers.meta.imbalanced;
 import moa.classifiers.AbstractClassifier;
 import moa.classifiers.MultiClassClassifier;
 import moa.classifiers.Classifier;
+import moa.classifiers.EnsembleBaseLearner;
 import moa.classifiers.core.attributeclassobservers.AttributeClassObserver;
 import moa.classifiers.core.attributeclassobservers.GaussianNumericAttributeClassObserverHistogram;
 import moa.classifiers.core.attributeclassobservers.NominalAttributeClassObserverHistogram;
-import moa.classifiers.core.driftdetection.ADWIN;
+import moa.classifiers.core.driftdetection.ChangeDetector;
 import moa.classifiers.trees.HoeffdingAdaptiveTreeHistogram;
 import moa.classifiers.trees.HoeffdingTreeHistogram.ActiveLearningNode;
 import moa.classifiers.trees.HoeffdingTreeHistogram.FoundNode;
@@ -34,25 +35,29 @@ import moa.core.DoubleVector;
 import moa.core.Measurement;
 import moa.core.Utils;
 import moa.options.ClassOption;
+
 import com.github.javacliparser.FlagOption;
 import com.github.javacliparser.FloatOption;
 import com.github.javacliparser.IntOption;
 import com.yahoo.labs.samoa.instances.Instance;
-import com.yahoo.labs.samoa.instances.SamoaToWekaInstanceConverter;
-import com.yahoo.labs.samoa.instances.WekaToSamoaInstanceConverter;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
+
+import org.apache.commons.math3.distribution.EnumeratedDistribution;
+import org.apache.commons.math3.util.Pair;
+
 
 
 /**
- * VFBCSMOTE
+ * VFCSMOTE
  *
  * <p>
  * This strategy saves all the mis-classified samples in a histogram managed by ADWIN.
  * There is also the possibility to save a percentage of correctly classified instances.  
  * In the meantime, a model is trained with the data in input. 
- * When the minority sample ratio is less than a certain threshold, an ONLINE BORDERLINE SMOTE version is applied.
- * A random minority sample is chosen from the histogram and a new synthetic sample is generated 
+ * When the minority sample ratio is less than a certain threshold, an ONLINE (BORDERLINE) SMOTE version is applied.
+ * A summary of a random minority sample is chosen from the histogram and a new synthetic sample is generated 
  * until the minority sample ratio is greater or equal than the threshold.
  * The model is then trained with the new samples generated.
  </p>
@@ -71,11 +76,11 @@ import java.util.Random;
  * @author Alessio Bernardo (alessio dot bernardo at polimi dot com) 
  * @version $Revision: 1 $
  */
-public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifier {
+public class VFCSMOTE extends AbstractClassifier implements MultiClassClassifier,EnsembleBaseLearner {
 
     @Override
     public String getPurposeString() {
-    	return "VFBCSMOTE strategy that saves all the mis-classified samples in a histogram managed by ADWIN. When the minority class ratio is less than a threshold it generates some synthetic new samples using an ONLINE BORDERLINE SMOTE version";
+        return "VFCSMOTE strategy that saves all the mis-classified samples in a histogram managed by ADWIN. When the minority class ratio is less than a threshold it generates some synthetic new samples using an ONLINE (BORDERLINE) SMOTE version";
     }
     
     private static final long serialVersionUID = 1L;
@@ -85,7 +90,7 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     
     public ClassOption baseHistogramOption = new ClassOption("baseHistogram", 'h',
             "Histrogram to use.", Classifier.class, "trees.HoeffdingAdaptiveTreeHistogram");        
-       
+           
     public FloatOption thresholdOption = new FloatOption("threshold", 't',
             "Minority class samples threshold.",
             0.5, 0.0, 1.0); 
@@ -96,10 +101,17 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     
     public IntOption minSizeAllowedOption = new IntOption("minSizeAllowed", 'm',
             "Minimum number of samples in the minority class for appling SMOTE.",
-            100, -1, Integer.MAX_VALUE); 
+            100, 1, Integer.MAX_VALUE); 
+    
+    public ClassOption driftDetectionMethodOption = new ClassOption("driftDetectionMethod", 'x',
+            "Change detector for drifts and its parameters", ChangeDetector.class, "ADWINChangeDetector -a 1.0E-5");
+
+    public ClassOption warningDetectionMethodOption = new ClassOption("warningDetectionMethod", 'p',
+            "Change detector for warnings", ChangeDetector.class, "ADWINChangeDetector -a 1.0E-4");
     
     public FlagOption disableDriftDetectionOption = new FlagOption("disableDriftDetection", 'd',
-            "Should use ADWIN as drift detector?");           
+            "Should use ADWIN as drift detector?");  
+   
     
     protected Classifier learner; 
     protected HoeffdingAdaptiveTreeHistogram histrogram;
@@ -111,15 +123,15 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     protected int nCorrectlySaved;
     protected boolean driftDetection;
             
-    protected DoubleVector generatedClassDistribution;  
-    protected ArrayList<Integer> alreadyUsed = new ArrayList<Integer>(); 
-    protected ADWIN driftDetector;
-    
-    protected SamoaToWekaInstanceConverter samoaToWeka = new SamoaToWekaInstanceConverter();
-    protected WekaToSamoaInstanceConverter wekaToSamoa = new WekaToSamoaInstanceConverter();    
+    protected DoubleVector generatedClassDistribution;
+    protected DoubleVector classDistribution;
+    protected DoubleVector bkgClassDistribution;            
 	protected int[] indexValues;
-
-    
+	
+	protected ChangeDetector driftDetectionMethod;
+    protected ChangeDetector warningDetectionMethod;
+	
+ 
     @Override
     public void resetLearningImpl() {     	    	
         this.learner = (Classifier) getPreparedClassOption(this.baseLearnerOption);         
@@ -130,11 +142,14 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
         this.driftDetection = !this.disableDriftDetectionOption.isSet();
         this.learner.resetLearning();            
         this.generatedClassDistribution = new DoubleVector();
-      	this.alreadyUsed.clear();      	      	   
+        this.classDistribution = new DoubleVector();
+        this.bkgClassDistribution = null;      	      	      	   
       	this.indexValues = null;
-      	this.driftDetector = new ADWIN();
+      	this.driftDetectionMethod = ((ChangeDetector) getPreparedClassOption(this.driftDetectionMethodOption)).copy();
+      	this.warningDetectionMethod = ((ChangeDetector) getPreparedClassOption(this.warningDetectionMethodOption)).copy();
       	this.nCorrectlyClassified = 0;
       	this.nCorrectlySaved = 0;
+      	this.classifierRandom = new Random(this.randomSeed);
     }
 
     @Override
@@ -144,8 +159,11 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     }
     
     @Override
-    public void trainOnInstanceImpl(Instance instance) {     	
+    public void trainOnInstanceImpl(Instance instance) {  
+    	
     	this.learner.trainOnInstance(instance);
+    	this.classDistribution.addToValue((int) instance.classValue(), 1);
+    	    	
     	if (Utils.maxIndex(this.learner.getVotesForInstance(instance)) != instance.classValue()) {
     		this.histrogram.trainOnInstance(instance);
     	} 
@@ -161,99 +179,70 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     			}    			
     		}    		    		
     	}
-    	    	
+    	  
     	//drift detection
-		if (this.driftDetection) {
-			driftDetection(instance);
-		}
+    	driftDetection(instance);
 		
+		List<Pair<FoundNode, Double>> leavesWeights = new ArrayList<Pair<FoundNode, Double>>();
+		int minClass = 0;
     	//check if the number of minority class samples are greater than -m
 		boolean allowSMOTE = false;
-		if (this.histrogram.observedClassDistribution.numValues() == instance.classAttribute().numValues()) {
-			if (this.minSizeAllowed != -1) {
-				int nMinClass = (int) this.histrogram.observedClassDistribution.minWeight();							
-				if (nMinClass > this.minSizeAllowed) {
-					allowSMOTE = true;
-				}
-			} else {
+		if (this.classDistribution.numValues() == instance.classAttribute().numValues()) {											
+			int nMinClass = (int) this.classDistribution.minWeight();					
+			if (nMinClass > this.minSizeAllowed) {
 				allowSMOTE = true;
-			}			
-		}									
-		//found leaves
-		FoundNode[] leaves = this.histrogram.getLeaves(null, -1, this.minSizeAllowed);
-		//found real minority class
-		int minClass = 0;
-		if ((this.histrogram.observedClassDistribution.getValue(0) + this.generatedClassDistribution.getValue(0)) <= 
-				(this.histrogram.observedClassDistribution.getValue(1) + this.generatedClassDistribution.getValue(1))) {
-			minClass = 0;
-		} else {
-			minClass = 1;
+				//found real minority class
+				minClass = getMinorityClass();
+				//found leaves			
+				leavesWeights = this.histrogram.getLeaves(null, -1, this.minSizeAllowed, minClass);	
+			}					
 		}		
+		
 		//Apply the online SMOTE version until the ratio will be equal to the threshold			
-		while (this.threshold > calculateRatio() && allowSMOTE && leaves.length != 0) {											
-			Instance newInstance = generateNewInstance(minClass,leaves,instance);    		
+		while (this.threshold > calculateRatio() && allowSMOTE && leavesWeights.size() != 0) {											
+			Instance newInstance = generateNewInstance(minClass,leavesWeights,instance);    		
     		this.generatedClassDistribution.addToValue(minClass, 1);
 			this.learner.trainOnInstance(newInstance);			
-		} 
-		this.alreadyUsed.clear();	
+		} 			
     }
  
     private double calculateRatio() {
-    	double ratio = 0.0;
-    	//class 0 is the real minority
-		if ((this.histrogram.observedClassDistribution.getValue(0) + this.generatedClassDistribution.getValue(0)) <= (this.histrogram.observedClassDistribution.getValue(1) + this.generatedClassDistribution.getValue(1))) {
-			ratio = ( (double) this.histrogram.observedClassDistribution.getValue(0) + (double) this.generatedClassDistribution.getValue(0) ) / 
-					( (double) this.histrogram.observedClassDistribution.getValue(0) + (double) this.generatedClassDistribution.getValue(0) + (double) this.histrogram.observedClassDistribution.getValue(1) + (double) this.generatedClassDistribution.getValue(1));			
-		}
-		//class 1 is the real minority
-		else {
-			ratio = ( (double) this.histrogram.observedClassDistribution.getValue(1) + (double) this.generatedClassDistribution.getValue(1) ) / 
-					( (double) this.histrogram.observedClassDistribution.getValue(0) + (double) this.generatedClassDistribution.getValue(0) + (double) this.histrogram.observedClassDistribution.getValue(1) + (double) this.generatedClassDistribution.getValue(1));			
-		}    					
-    	return ratio;
+    	int minClass = getMinorityClass();
+    	return ( (double) this.classDistribution.getValue(minClass) + (double) this.generatedClassDistribution.getValue(minClass) ) / 
+			   ( (double) this.classDistribution.getValue(0) + (double) this.generatedClassDistribution.getValue(0) + (double) this.classDistribution.getValue(1) + (double) this.generatedClassDistribution.getValue(1));    						    	
     }	   
     
-    private Instance generateNewInstance(int minClass, FoundNode[] leaves, Instance instance) {       	    	    		    	
-    	//find randomly an instance
-    	Random rand = new Random(1);
-		int pos = rand.nextInt(leaves.length);
-        while (this.alreadyUsed.contains(pos)) {
-        	pos = rand.nextInt(leaves.length);
-        }
-        this.alreadyUsed.add(pos);
-        if (this.alreadyUsed.size() == leaves.length) {
-        	this.alreadyUsed.clear();
-        }	
-        FoundNode leaf = leaves[pos];        
-        Node leafNode = leaf.node;
+    private Instance generateNewInstance(int minClass, List<Pair<FoundNode, Double>> leavesWeight, Instance instance) {       	    	    		    	
+    	//find a leaf based on weight
+    	FoundNode selectedLeaf = new EnumeratedDistribution<>(leavesWeight).sample();    	    	    	
+      
+        Node leafNode = selectedLeaf.node;
         if (leafNode == null) {        	
-    		leafNode = leaf.parent;                               
-        }            
+    		leafNode = selectedLeaf.parent;                               
+        }                                                
         
         double[] values = new double[instance.numAttributes()];
         for (int i = 0; i < ((ActiveLearningNode) leafNode).getAttributeObservers().size(); i++) {  
         	int instAttIndex = modelAttIndexToInstanceAttIndex(i, instance);
             AttributeClassObserver obs = ((ActiveLearningNode) leafNode).getAttributeObservers().get(i);
             if (obs != null) {
-            	if (obs instanceof GaussianNumericAttributeClassObserverHistogram) {
+            	if (obs instanceof GaussianNumericAttributeClassObserverHistogram) {            		
             		if (((GaussianNumericAttributeClassObserverHistogram) obs).getAttValDistPerClass().get(minClass) == null) {
             			values[instAttIndex] = 0;
             		} else {
-            			double mean = ((GaussianNumericAttributeClassObserverHistogram) obs).getAttValDistPerClass().get(minClass).getSimpleMean();
-                    	double variance = ((GaussianNumericAttributeClassObserverHistogram) obs).getAttValDistPerClass().get(minClass).getSimpleVariance();            	
-                    	values[instAttIndex] = rand.nextGaussian()*variance+mean;
+            			values[instAttIndex] = ((GaussianNumericAttributeClassObserverHistogram) obs).getSampleFromBeta(minClass);	                                			
             		}                	
                 }
                 else if (obs instanceof NominalAttributeClassObserverHistogram) {
                 	if (((NominalAttributeClassObserverHistogram) obs).attValDistPerClassSimple.get(minClass) == null) {                		
-                		values[instAttIndex] = rand.nextInt(instance.attribute(instAttIndex).numValues());
-                	} else {
-                		values[instAttIndex] = ((NominalAttributeClassObserverHistogram) obs).attValDistPerClassSimple.get(minClass).maxIndex();
+                		values[instAttIndex] = this.classifierRandom.nextInt(instance.attribute(instAttIndex).numValues());
+                	} else {                		
+                		values[instAttIndex] = ((NominalAttributeClassObserverHistogram) obs).attValDistPerClass.get(minClass).maxIndex();
                 	}                	            	
                 }
             } else {
             	if (instance.attribute(instAttIndex).isNominal()) {
-            		values[instAttIndex] = rand.nextInt(instance.attribute(instAttIndex).numValues());
+            		values[instAttIndex] = this.classifierRandom.nextInt(instance.attribute(instAttIndex).numValues());
             	} else {
             		values[instAttIndex] = 0;            		
             	}            	
@@ -261,7 +250,7 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
             
         }
         values[instance.classIndex()] = minClass;
-        
+              
         if (this.indexValues == null) {    		
     		this.indexValues = new int[instance.numAttributes()];
     		for (int i = 0; i < instance.numAttributes(); i ++) {
@@ -270,24 +259,42 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     	}  
         
         //new synthetic instance
-		Instance synthetic = instance.copy();
-		synthetic.addSparseValues(this.indexValues, values, instance.numAttributes());		
+		Instance synthetic = (Instance) instance.copy();
+		synthetic.addSparseValues(this.indexValues, values, instance.numAttributes());	
+		synthetic.setWeight(1.0);		
 		
 		return synthetic;
     	    	
     }
 
-    private void driftDetection(Instance instance) {
-    	double pred = Utils.maxIndex(this.learner.getVotesForInstance(instance));
-		double errorEstimation = this.driftDetector.getEstimation();
-		double inputValue = pred == instance.classValue() ? 1.0 : 0.0;
-		boolean resInput = this.driftDetector.setInput(inputValue);
-		if (resInput) {
-			if (this.driftDetector.getEstimation() > errorEstimation) {							        			        	
-        		this.learner.resetLearning();
-        		this.driftDetector = new ADWIN();		        	
-			}
+    protected void driftDetection(Instance instance) {
+    	// Update the warning detection method
+    	if (this.bkgClassDistribution != null) {
+    		this.bkgClassDistribution.addToValue((int) instance.classValue(), 1);
+    	}    	
+    	boolean correctlyClassifies = this.learner.correctlyClassifies(instance);
+    	this.warningDetectionMethod.input(correctlyClassifies ? 0 : 1);
+    	if(this.warningDetectionMethod.getChange()) {
+    		this.bkgClassDistribution = new DoubleVector();
+    		this.warningDetectionMethod = ((ChangeDetector) getPreparedClassOption(this.warningDetectionMethodOption)).copy();
+    	}
+    	// Update the DRIFT detection method
+        this.driftDetectionMethod.input(correctlyClassifies ? 0 : 1);
+        // Check if there was a change
+        if(this.driftDetectionMethod.getChange()) {            
+            this.reset();
+        }	
+    }
+    
+    protected void reset() {
+    	if (this.bkgClassDistribution != null) {
+    		this.classDistribution = new DoubleVector(this.bkgClassDistribution);
+    		this.bkgClassDistribution = null;
+    	}
+		if (this.driftDetection) {
+			this.learner.resetLearning();
 		}
+		this.driftDetectionMethod = ((ChangeDetector) getPreparedClassOption(this.driftDetectionMethodOption)).copy();
     }
     
     @Override
@@ -311,6 +318,16 @@ public class VFBCSMOTE extends AbstractClassifier implements MultiClassClassifie
     
     public String toString() {
         return "SMOTE online stategy using " + this.learner + " and ADWIN as sliding window";
-    }       
+    }
+
+	@Override
+	public int getMinorityClass() {
+		if ((this.classDistribution.getValue(0) + this.generatedClassDistribution.getValue(0)) <= 
+				(this.classDistribution.getValue(1) + this.generatedClassDistribution.getValue(1))) {
+			return 0;
+		} else {
+			return 1;
+		}		
+	}       
     
 }
