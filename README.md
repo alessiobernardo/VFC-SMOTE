@@ -20,14 +20,12 @@ http://moa.cms.waikato.ac.nz/
 
 MOA performs BIG DATA stream mining in real time, and large scale machine learning. MOA can be extended with new mining algorithms, and new stream generators or evaluation measures. The goal is to provide a benchmark suite for the stream mining community. 
 
-## Mailing lists
-* MOA users: http://groups.google.com/group/moa-users
-* MOA developers: http://groups.google.com/group/moa-development
+## VFC-SMOTE
+The VFC-SMOTE algorithm is in the moa/src/main/java/moa/classifiers/meta/imbalanced folder.
 
-## Citing MOA
-If you want to refer to MOA in a publication, please cite the following JMLR paper: 
+## Citing VFC-SMOTE
+If you want to refer to VFC-SMOTE in a publication, please cite the following paper: 
 
-> Albert Bifet, Geoff Holmes, Richard Kirkby, Bernhard Pfahringer (2010);
-> MOA: Massive Online Analysis; Journal of Machine Learning Research 11: 1601-1604 
+Bernardo, Alessio, and Emanuele Della Valle. "VFC-SMOTE: very fast continuous synthetic minority oversampling for evolving data streams." Data Mining and Knowledge Discovery (2021): 1-35. 
 
 
