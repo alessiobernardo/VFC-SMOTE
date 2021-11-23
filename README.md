@@ -26,6 +26,7 @@ The VFC-SMOTE algorithm is in the moa/src/main/java/moa/classifiers/meta/imbalan
 ## Citing VFC-SMOTE
 If you want to refer to VFC-SMOTE in a publication, please cite the following paper: 
 
-Bernardo, Alessio, and Emanuele Della Valle. "VFC-SMOTE: very fast continuous synthetic minority oversampling for evolving data streams." Data Mining and Knowledge Discovery (2021): 1-35. 
-
+```
+Bernardo, Alessio, and Emanuele Della Valle. "VFC-SMOTE: very fast continuous synthetic minority oversampling for evolving data streams." Data Mining and Knowledge Discovery (2021): 1-35. DOI: https://doi.org/10.1007/s10618-021-00786-0
+```
 
